@@ -19,7 +19,6 @@ os.environ['ALL_PROXY'] = ''
 app = FastAPI()
 
 clean_http_client = httpx.Client(trust_env=False)
-# Ключ теперь безопасно спрятан
 client = Groq(
     api_key=os.environ.get("GROQ_API_KEY"),
     http_client=clean_http_client
@@ -137,12 +136,17 @@ def analyze_and_judge(transcript, current_team, theme):
 async def debate_endpoint(websocket: WebSocket):
     global current_theme, team_profiles
     await websocket.accept()
-    print("🎭 ПОДКЛЮЧЕНИЕ К КАНАЛУ ДЕБАТОВ")
+    print("🎭 ПОДКЛЮЧЕНИЕ К КАНАЛУ ДЕБАТОВ УСТАНОВЛЕНО")
     current_team = "unknown"
 
     try:
         while True:
             message = await websocket.receive()
+            
+            # Защита от внезапного обрыва соединения (исключает RuntimeError)
+            if message.get("type") == "websocket.disconnect":
+                print("🔴 Клиент разорвал соединение")
+                break
             
             if "text" in message:
                 text_data = message["text"]
@@ -155,7 +159,7 @@ async def debate_endpoint(websocket: WebSocket):
                     team_profiles["A"] = game_config["profiles"]["A"]
                     team_profiles["B"] = game_config["profiles"]["B"]
                     
-                    print(f"📌 Настройки: Тема [{current_theme}], Профили: {team_profiles}")
+                    print(f"📌 Настройки: Тема [{current_theme}]")
                     
                     intro_speech = generate_academic_intro(current_theme)
                     audio_b64 = await text_to_speech_bytes(intro_speech)
@@ -211,7 +215,9 @@ async def debate_endpoint(websocket: WebSocket):
                 await websocket.send_text(json.dumps(data_packet))
 
     except WebSocketDisconnect:
-        print("🔴 Клиент отключился")
+        print("🔴 Вебсокет закрыт (FastAPI)")
+    except Exception as e:
+        print(f"💥 Ошибка внутри вебсокета: {e}")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
