@@ -48,7 +48,6 @@ async def text_to_speech_bytes(text: str) -> str:
         cleaned = re.sub(r'\(0\s*б\..*?\)', '', cleaned)
         cleaned = cleaned.replace("🔥", "").replace("🎤", "").strip()
         
-        # Заменили голос Светланы на более четкий мужской голос Дмитрия, он звучит стабильнее
         communicate = edge_tts.Communicate(cleaned, "ru-RU-DmitryNeural")
         audio_bytes = b""
         async for chunk in communicate.stream():
@@ -62,17 +61,25 @@ async def text_to_speech_bytes(text: str) -> str:
 
 def generate_academic_intro(theme: str):
     prompt = f"""
-    Ты — строгий модератор интеллектуальных дебатов "NeuroRing".
-    Тема дебатов: "{theme}".
-    Напиши очень короткое, хлесткое вступление. Максимум 3 предложения.
-    Стиль: саркастичный, профессиональный, литературный русский язык.
-    Строго соблюдай правила русского языка, падежи и склонения.
-    Закончи текст ровно этой фразой: "Минута на подготовку пошла."
+    Напиши короткое вступительное слово для дебатов.
+    Тема: "{theme}".
+    
+    Правила:
+    1. Не более 2 предложений.
+    2. Простой, правильный русский язык. Без сложных метафор.
+    3. Серьезный, ведущий тон.
+    4. Закончи строго фразой: "Минута на подготовку пошла."
+    
+    Пример: "Добро пожаловать на дебаты. Сегодня мы обсуждаем: {theme}. Посмотрим, чьи аргументы окажутся убедительнее. Минута на подготовку пошла."
     """
     try:
         response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
-            messages=[{"role": "user", "content": prompt}]
+            messages=[
+                {"role": "system", "content": "Ты отвечаешь только правильным, простым русским языком."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3
         )
         return response.choices[0].message.content.strip()
     except Exception:
@@ -95,29 +102,34 @@ def analyze_and_judge(transcript, current_team, theme):
     opponent_team = "B" if current_team == "A" else "A"
     
     prompt = f"""
-    Ты — строгий, циничный судья дебатов "NeuroRing".
+    Ты — строгий судья дебатов.
     Тема: "{theme}".
+    Реплика спикера (Команда {current_team}): "{transcript}"
     
-    Реплика спикера из команды {current_team}: "{transcript}"
+    Оцени аргумент от 0 до 10. Отвечай максимально коротко (1-2 предложения).
+    Используй простой, правильный русский язык. НИКАКИХ сложных метафор или выдуманных слов.
+    Тон: академичный, слегка надменный.
     
-    ТВОЯ РОЛЬ:
-    Оцени аргумент по 10-балльной шкале. 
-    Дай короткий, острый комментарий (максимум 2 предложения).
-    НИКАКОЙ ФАМИЛЬЯРНОСТИ (запрещено использовать слова "красотка", "парень", "дружище").
-    Строго соблюдай падежи, склонения и правила русского языка.
-    Затем коротко передай ход Команде {opponent_team}.
+    ПРИМЕРЫ ХОРОШИХ ОТВЕТОВ (ОРИЕНТИРУЙСЯ НА НИХ):
+    - "Слабый аргумент, основанный лишь на эмоциях, а не на фактах. Посмотрим, что ответят оппоненты."
+    - "Интересный тезис, хотя и не лишен логических дыр. Передаю слово другой команде."
+    - "Банальное утверждение. Ожидаю от вас более глубокого анализа проблемы."
     
     ОТВЕТЬ СТРОГО В ФОРМАТЕ JSON:
     {{
-        "comment": "Твоя строгая и саркастичная оценка аргумента.",
-        "pass_turn": "Короткая фраза передачи хода",
-        "points": 0
+        "comment": "Твой комментарий по примеру выше.",
+        "pass_turn": "Ход Команды {opponent_team}.",
+        "points": 5
     }}
     """
     try:
         response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
-            messages=[{"role": "user", "content": prompt}]
+            messages=[
+                {"role": "system", "content": "Ты отвечаешь только правильным, простым русским языком. Никаких выдуманных слов."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3
         )
         raw_text = response.choices[0].message.content.strip()
         json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
@@ -169,8 +181,7 @@ async def debate_endpoint(websocket: WebSocket):
                     await websocket.send_text(json.dumps(data_packet))
                     
                 elif text_data.startswith("TEAM_SIGNAL:"):
-                    # ИСПРАВЛЕНИЕ: Четкое определение команды
-                    if "А" in text_data or "A" in text_data: # Русская и английская А
+                    if "А" in text_data or "A" in text_data:
                         current_team = "A"
                     else:
                         current_team = "B"
