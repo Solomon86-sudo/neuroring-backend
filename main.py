@@ -48,7 +48,8 @@ async def text_to_speech_bytes(text: str) -> str:
         cleaned = re.sub(r'\(0\s*б\..*?\)', '', cleaned)
         cleaned = cleaned.replace("🔥", "").replace("🎤", "").strip()
         
-        communicate = edge_tts.Communicate(cleaned, "ru-RU-SvetlanaNeural")
+        # Заменили голос Светланы на более четкий мужской голос Дмитрия, он звучит стабильнее
+        communicate = edge_tts.Communicate(cleaned, "ru-RU-DmitryNeural")
         audio_bytes = b""
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
@@ -61,11 +62,12 @@ async def text_to_speech_bytes(text: str) -> str:
 
 def generate_academic_intro(theme: str):
     prompt = f"""
-    Ты — ведущий интеллектуального шоу "NeuroRing".
+    Ты — строгий модератор интеллектуальных дебатов "NeuroRing".
     Тема дебатов: "{theme}".
-    Напиши глубокое, интригующее вступление. 
-    Стиль: строго академический, элегантный, литературный русский язык. 
-    Текст должен состоять из 2 абзацев и заканчиваться фразой: «Объявляю минуту на подготовку команд!».
+    Напиши очень короткое, хлесткое вступление. Максимум 3 предложения.
+    Стиль: саркастичный, профессиональный, литературный русский язык.
+    Строго соблюдай правила русского языка, падежи и склонения.
+    Закончи текст ровно этой фразой: "Минута на подготовку пошла."
     """
     try:
         response = client.chat.completions.create(
@@ -74,7 +76,7 @@ def generate_academic_intro(theme: str):
         )
         return response.choices[0].message.content.strip()
     except Exception:
-        return f"Тема нашей дискуссии: {theme}. Объявляю минуту на подготовку команд!"
+        return f"Тема нашей дискуссии: {theme}. Минута на подготовку пошла."
 
 def transcribe_audio_pro(file_path):
     try:
@@ -91,29 +93,24 @@ def transcribe_audio_pro(file_path):
 
 def analyze_and_judge(transcript, current_team, theme):
     opponent_team = "B" if current_team == "A" else "A"
-    sp_gender = team_profiles[current_team]['gender']
-    sp_age = team_profiles[current_team]['age']
-    op_gender = team_profiles[opponent_team]['gender']
-    op_age = team_profiles[opponent_team]['age']
     
     prompt = f"""
-    Ты — острый на язык судья дебатов "NeuroRing" (в стиле Ксении Собчак).
+    Ты — строгий, циничный судья дебатов "NeuroRing".
     Тема: "{theme}".
     
-    КОНТЕКСТ РАУНДА:
-    - Сейчас в микрофон говорит: Команда {current_team} ({sp_gender}, {sp_age} лет).
-    - Их оппоненты: Команда {opponent_team} ({op_gender}, {op_age} лет).
-    
-    Реплика текущего спикера: "{transcript}"
+    Реплика спикера из команды {current_team}: "{transcript}"
     
     ТВОЯ РОЛЬ:
-    Ты больше НЕ задаешь наводящих вопросов по теме. Участники спорят ДРУГ С ДРУГОМ. 
-    Твоя задача только оценить удар, дать короткий комментарий (обязательно учитывая пол/возраст спикера для иронии или комплимента) и передать ход оппоненту.
+    Оцени аргумент по 10-балльной шкале. 
+    Дай короткий, острый комментарий (максимум 2 предложения).
+    НИКАКОЙ ФАМИЛЬЯРНОСТИ (запрещено использовать слова "красотка", "парень", "дружище").
+    Строго соблюдай падежи, склонения и правила русского языка.
+    Затем коротко передай ход Команде {opponent_team}.
     
     ОТВЕТЬ СТРОГО В ФОРМАТЕ JSON:
     {{
-        "comment": "Твоя хлёсткая оценка услышанного с отсылкой к возрасту или полу спикера. (Максимум 2 предложения)",
-        "pass_turn": "Фраза передачи микрофона оппоненту",
+        "comment": "Твоя строгая и саркастичная оценка аргумента.",
+        "pass_turn": "Короткая фраза передачи хода",
         "points": 0
     }}
     """
@@ -130,7 +127,7 @@ def analyze_and_judge(transcript, current_team, theme):
             raise ValueError("JSON не найден")
     except Exception as e:
         print(f"Ошибка Llama: {e}")
-        return {"comment": "Аргумент засчитан.", "pass_turn": "Слово оппонентам.", "points": 5}
+        return {"comment": "Аргумент принят к сведению.", "pass_turn": f"Ход Команды {opponent_team}.", "points": 5}
 
 @app.websocket("/ws/debate")
 async def debate_endpoint(websocket: WebSocket):
@@ -143,7 +140,6 @@ async def debate_endpoint(websocket: WebSocket):
         while True:
             message = await websocket.receive()
             
-            # Защита от внезапного обрыва соединения (исключает RuntimeError)
             if message.get("type") == "websocket.disconnect":
                 print("🔴 Клиент разорвал соединение")
                 break
@@ -173,7 +169,11 @@ async def debate_endpoint(websocket: WebSocket):
                     await websocket.send_text(json.dumps(data_packet))
                     
                 elif text_data.startswith("TEAM_SIGNAL:"):
-                    current_team = "A" if "ЕСТЬ" in text_data else "B"
+                    # ИСПРАВЛЕНИЕ: Четкое определение команды
+                    if "А" in text_data or "A" in text_data: # Русская и английская А
+                        current_team = "A"
+                    else:
+                        current_team = "B"
             
             elif "bytes" in message:
                 audio_data = message["bytes"]
@@ -186,7 +186,7 @@ async def debate_endpoint(websocket: WebSocket):
                 transcript = transcribe_audio_pro(filename)
                 
                 if not transcript or len(transcript.strip()) < 5:
-                    text_fallback = "Микрофон передан, но я ничего не услышала."
+                    text_fallback = "Микрофон передан, но я ничего не услышал."
                     audio_b64 = await text_to_speech_bytes(text_fallback)
                     data_packet = {
                         "transcript": "...", "text": text_fallback,
